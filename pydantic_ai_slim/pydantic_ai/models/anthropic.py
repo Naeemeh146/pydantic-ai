@@ -1070,6 +1070,13 @@ class AnthropicModel(Model[AsyncAnthropicClient]):
         # A non-streaming request's transport errors reach us as the SDK's `APIConnectionError`, but a stream's don't.
         try:
             response = await self._messages_create(messages, False, model_settings, model_request_parameters)
+            if isinstance(response, str):
+                # The SDK returns the body as a string when the endpoint responds with a non-JSON
+                # content-type (e.g. `text/plain`) instead of the expected message object.
+                raise ModelAPIError(
+                    model_name=self.model_name,
+                    message=f'Invalid response from {self.system} messages endpoint, expected JSON data',
+                )
             if isinstance(response, BetaMessage):
                 return self._process_response(response, model_request_parameters, model_settings)
             # The request was streamed behind the scenes, see `_messages_create`.

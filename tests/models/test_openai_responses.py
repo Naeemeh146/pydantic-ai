@@ -14862,6 +14862,31 @@ async def test_openai_responses_compact_with_instructions(allow_model_requests: 
 
 
 @pytest.mark.vcr(ignore_hosts=['api.openai.com'])
+async def test_openai_responses_text_plain_response_body_raises_model_api_error(allow_model_requests: None):
+    """A 200 responses body with a non-JSON content-type surfaces as `ModelAPIError`, not an `AttributeError`.
+
+    The SDK returns the body as a `str` instead of raising, so the guard in `_process_response` rejects it.
+    A mock transport stands in for a cassette because no real provider returns such a body on demand.
+    https://github.com/pydantic/pydantic-ai/issues/9579
+    """
+
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, content=b'plain text, not JSON', headers={'content-type': 'text/plain'})
+
+    async with AsyncOpenAI(
+        api_key='test',
+        base_url='https://api.openai.com/v1',
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+    ) as openai_client:
+        model = OpenAIResponsesModel('gpt-5', provider=OpenAIProvider(openai_client=openai_client))
+
+        with pytest.raises(ModelAPIError) as exc_info:
+            await model.request([ModelRequest(parts=[UserPromptPart('Hello')])], None, ModelRequestParameters())
+
+    assert exc_info.value.message == 'Invalid response from openai responses endpoint, expected JSON data'
+
+
+@pytest.mark.vcr(ignore_hosts=['api.openai.com'])
 @pytest.mark.parametrize(
     ('content', 'cause'),
     [

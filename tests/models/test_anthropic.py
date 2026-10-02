@@ -3061,6 +3061,35 @@ def test_model_connection_error(allow_model_requests: None) -> None:
     assert 'Connection to https://api.anthropic.com timed out' in str(exc_info.value.message)
 
 
+@pytest.mark.vcr(ignore_hosts=['api.anthropic.com'])
+async def test_text_plain_response_body_raises_model_api_error(allow_model_requests: None) -> None:
+    """A 200 messages body with a non-JSON content-type surfaces as `ModelAPIError`, not an `AttributeError`.
+
+    The SDK returns the body as a `str` instead of raising, so the guard in `request()` rejects it.
+    `max_tokens` is set so the SDK doesn't stream the request behind the scenes, which would bypass the guard.
+    A mock transport stands in for a cassette because no real provider returns such a body on demand.
+    https://github.com/pydantic/pydantic-ai/issues/9579
+    """
+
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, content=b'plain text, not JSON', headers={'content-type': 'text/plain'})
+
+    model = AnthropicModel(
+        'claude-sonnet-4-5',
+        provider=AnthropicProvider(
+            api_key='test', http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+        ),
+    )
+    with pytest.raises(ModelAPIError) as exc_info:
+        await model.request(
+            [ModelRequest(parts=[UserPromptPart('Hello')])],
+            ModelSettings(max_tokens=1024),
+            ModelRequestParameters(),
+        )
+
+    assert exc_info.value.message == 'Invalid response from anthropic messages endpoint, expected JSON data'
+
+
 async def test_count_tokens_connection_error(allow_model_requests: None) -> None:
     mock_client = MockAnthropic.create_mock(
         APIConnectionError(

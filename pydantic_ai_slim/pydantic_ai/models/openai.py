@@ -2405,11 +2405,18 @@ class OpenAIResponsesModel(Model[AsyncOpenAI]):
 
     def _process_response(  # noqa: C901
         self,
-        response: responses.Response,
+        response: responses.Response | str,
         model_settings: OpenAIResponsesModelSettings,
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
         """Process a non-streamed response, and prepare a message to return."""
+        # Although the OpenAI SDK claims to return a Pydantic model (`Response`) from the responses function,
+        # if the endpoint returns plain text, the return type is a string. Thus we validate it fully here.
+        if not isinstance(response, responses.Response):
+            raise ModelAPIError(
+                model_name=self.model_name,
+                message=f'Invalid response from {self.system} responses endpoint, expected JSON data',
+            )
         if error := response.error:
             raise _response_error(self.model_name, error.code, error.message)
         items: list[ModelResponsePart] = []
